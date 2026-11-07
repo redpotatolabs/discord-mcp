@@ -1,0 +1,338 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/epistemi/discord-mcp/internal/discord"
+)
+
+const (
+	guild   = "111111111111111111"
+	channel = "333333333333333333"
+	msg     = "666666666666666666"
+	user    = "777777777777777777"
+)
+
+func endpoint(t *testing.T, name string) Endpoint {
+	t.Helper()
+	for _, e := range Catalog {
+		if e.Name == name {
+			return e
+		}
+	}
+	t.Fatalf("no endpoint %s", name)
+	return Endpoint{}
+}
+
+func TestCatalogSanity(t *testing.T) {
+	seen := map[string]bool{"server_overview": true, "permissions": true, "discord_request": true}
+	for _, e := range Catalog {
+		if seen[e.Name] {
+			t.Errorf("duplicate tool name %s", e.Name)
+		}
+		seen[e.Name] = true
+		if e.Desc == "" {
+			t.Errorf("%s: missing description", e.Name)
+		}
+		if !strings.HasPrefix(e.Path, "/") {
+			t.Errorf("%s: bad path %s", e.Name, e.Path)
+		}
+		if !contains(rawMethods, e.Method) {
+			t.Errorf("%s: bad method %s", e.Name, e.Method)
+		}
+		if e.Destructive && e.ReadOnly() {
+			t.Errorf("%s: GET marked destructive", e.Name)
+		}
+		for _, ph := range e.placeholders() {
+			if defaultPathDesc[ph] == "" && e.PathDesc[ph] == "" {
+				t.Errorf("%s: placeholder %s has no description", e.Name, ph)
+			}
+		}
+		params := map[string]bool{}
+		for _, p := range e.Params {
+			if params[p.Name] {
+				t.Errorf("%s: duplicate param %s", e.Name, p.Name)
+			}
+			params[p.Name] = true
+		}
+		// Schema must serialize (catches bad property options).
+		if _, err := json.Marshal(e.Tool(true)); err != nil {
+			t.Errorf("%s: %v", e.Name, err)
+		}
+	}
+}
+
+func TestBuildPathDefaultGuildAndValidation(t *testing.T) {
+	e := endpoint(t, "add_member_role")
+	ctx := context.Background()
+
+	req, err := e.Build(ctx, map[string]any{"user_id": user, "role_id": "888888888888888888", "reason": "promo"}, guild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Path != "/guilds/"+guild+"/members/"+user+"/roles/888888888888888888" || req.Reason != "promo" || req.Body != nil {
+		t.Errorf("req = %+v", req)
+	}
+
+	if _, err := e.Build(ctx, map[string]any{"user_id": user, "role_id": "1"}, guild); err == nil {
+		t.Error("expected invalid role_id error")
+	}
+	if _, err := e.Build(ctx, map[string]any{"user_id": "../x", "role_id": "888888888888888888"}, guild); err == nil {
+		t.Error("expected traversal rejection")
+	}
+	if _, err := e.Build(ctx, map[string]any{"user_id": user, "role_id": "888888888888888888"}, ""); err == nil {
+		t.Error("expected guild_id required")
+	}
+}
+
+func TestBuildBodyExtraDefaultsQuery(t *testing.T) {
+	ctx := context.Background()
+
+	ev := endpoint(t, "create_scheduled_event")
+	req, err := ev.Build(ctx, map[string]any{"name": "Game night", "entity_type": float64(3), "extra": map[string]any{"name": "overridden", "x": nil}}, guild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"name": "Game night", "entity_type": int64(3), "privacy_level": 2, "x": nil}
+	if !reflect.DeepEqual(req.Body, want) {
+		t.Errorf("body = %#v", req.Body)
+	}
+
+	lm := endpoint(t, "list_messages")
+	req, err = lm.Build(ctx, map[string]any{"channel_id": channel, "limit": float64(50), "before": msg}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Query.Encode() != "before="+msg+"&limit=50" || req.Body != nil {
+		t.Errorf("query = %s body=%v", req.Query.Encode(), req.Body)
+	}
+
+	ro := endpoint(t, "reorder_roles")
+	positions := []any{map[string]any{"id": "1", "position": float64(2)}}
+	req, err = ro.Build(ctx, map[string]any{"positions": positions}, guild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(req.Body, positions) {
+		t.Errorf("raw body = %#v", req.Body)
+	}
+
+	cc := endpoint(t, "create_channel")
+	if _, err := cc.Build(ctx, map[string]any{"type": float64(0)}, guild); err == nil {
+		t.Error("expected name required")
+	}
+	if _, err := cc.Build(ctx, map[string]any{"name": "x", "nsfw": "yes"}, guild); err == nil {
+		t.Error("expected bool type error")
+	}
+
+	// Emoji path values are escaped.
+	ar := endpoint(t, "add_reaction")
+	req, err = ar.Build(ctx, map[string]any{"channel_id": channel, "message_id": msg, "emoji": "👍"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(req.Path, "/reactions/%F0%9F%91%8D/@me") {
+		t.Errorf("path = %s", req.Path)
+	}
+}
+
+func TestImageParam(t *testing.T) {
+	png := []byte("\x89PNG\r\n\x1a\n0000")
+	p := filepath.Join(t.TempDir(), "icon.png")
+	if err := os.WriteFile(p, png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := toDataURI(context.Background(), p)
+	if err != nil || !strings.HasPrefix(got, "data:image/png;base64,") {
+		t.Fatalf("got %q err %v", got, err)
+	}
+	txt := filepath.Join(t.TempDir(), "a.txt")
+	_ = os.WriteFile(txt, []byte("hello"), 0o600)
+	if _, err := toDataURI(context.Background(), txt); err == nil {
+		t.Error("expected non-image rejection")
+	}
+	if v, _ := toDataURI(context.Background(), "data:image/gif;base64,AA=="); v != "data:image/gif;base64,AA==" {
+		t.Error("data URI should pass through")
+	}
+}
+
+func TestPermissions(t *testing.T) {
+	bits, err := PermissionsToBits([]string{"view_channel", "SEND_MESSAGES"})
+	if err != nil || bits != "3072" {
+		t.Fatalf("bits=%s err=%v", bits, err)
+	}
+	names, err := BitsToPermissions("3072")
+	if err != nil || !reflect.DeepEqual(names, []string{"VIEW_CHANNEL", "SEND_MESSAGES"}) {
+		t.Fatalf("names=%v err=%v", names, err)
+	}
+	if _, err := PermissionsToBits([]string{"FLY"}); err == nil {
+		t.Error("expected unknown permission")
+	}
+	names, _ = BitsToPermissions("140737488355328") // bit 47
+	if !reflect.DeepEqual(names, []string{"UNKNOWN_BIT_47"}) {
+		t.Errorf("names = %v", names)
+	}
+}
+
+func TestValidateRawPath(t *testing.T) {
+	for _, p := range []string{"guilds/1", "/guilds/1/../2", "/guilds//1", "/guilds/1?x=1", "/guilds/%2e%2e/2", "/a\\b"} {
+		if ValidateRawPath(p) == nil {
+			t.Errorf("%q should be rejected", p)
+		}
+	}
+	if err := ValidateRawPath("/guilds/1/templates"); err != nil {
+		t.Error(err)
+	}
+}
+
+// ---- end to end through the MCP server ----
+
+type hit struct{ method, path, body string }
+
+func newTestServer(t *testing.T, readOnly bool, allowed []string) (*server.MCPServer, *[]hit) {
+	t.Helper()
+	var hits []hit
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		hits = append(hits, hit{r.Method, r.URL.Path, string(b)})
+		switch {
+		case r.URL.Path == "/channels/"+channel:
+			_, _ = w.Write([]byte(`{"id":"` + channel + `","guild_id":"` + guild + `"}`))
+		case r.URL.Path == "/guilds/"+guild:
+			_, _ = w.Write([]byte(`{"id":"` + guild + `","name":"Test","owner_id":"1","emojis":[1,2,3]}`))
+		case r.URL.Path == "/guilds/"+guild+"/roles":
+			_, _ = w.Write([]byte(`[{"id":"` + guild + `","name":"@everyone","position":0,"permissions":"0"},{"id":"9","name":"Admin","position":2,"permissions":"8"},{"id":"10","name":"Bot","position":3,"permissions":"0","managed":true}]`))
+		case r.URL.Path == "/guilds/"+guild+"/channels":
+			_, _ = w.Write([]byte(`[{"id":"c1","name":"General","type":4,"position":0},{"id":"t2","name":"chat","type":0,"position":1,"parent_id":"c1"},{"id":"t1","name":"rules","type":0,"position":0,"parent_id":"c1"},{"id":"x","name":"loose","type":0,"position":0}]`))
+		case r.URL.Path == "/users/@me":
+			_, _ = w.Write([]byte(`{"id":"` + user + `"}`))
+		case r.URL.Path == "/guilds/"+guild+"/members/"+user:
+			_, _ = w.Write([]byte(`{"roles":["10"]}`))
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			_, _ = w.Write([]byte(`{"id":"new"}`))
+		}
+	}))
+	t.Cleanup(api.Close)
+
+	c, err := discord.New("tok", api.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := server.NewMCPServer("test", "0")
+	Register(s, Deps{Client: c, Scope: discord.NewScope(c, allowed), DefaultGuild: guild}, readOnly)
+	return s, &hits
+}
+
+func call(t *testing.T, s *server.MCPServer, name string, args map[string]any) (string, bool) {
+	t.Helper()
+	tool := s.GetTool(name)
+	if tool == nil {
+		return "", false
+	}
+	var req mcp.CallToolRequest
+	req.Params.Name = name
+	req.Params.Arguments = args
+	res, err := tool.Handler(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := res.Content[0].(mcp.TextContent).Text
+	if res.IsError {
+		return "ERR: " + text, true
+	}
+	return text, true
+}
+
+func TestEndToEnd(t *testing.T) {
+	s, hits := newTestServer(t, false, []string{guild})
+
+	out, _ := call(t, s, "send_message", map[string]any{"channel_id": channel, "content": "hi"})
+	if out != `{"id":"new"}` {
+		t.Fatalf("send_message = %s", out)
+	}
+	last := (*hits)[len(*hits)-1]
+	if last.method != "POST" || last.path != "/channels/"+channel+"/messages" || last.body != `{"content":"hi"}` {
+		t.Errorf("last hit = %+v", last)
+	}
+
+	out, _ = call(t, s, "delete_role", map[string]any{"role_id": "888888888888888888"})
+	if out != `{"ok":true}` {
+		t.Errorf("delete_role = %s", out)
+	}
+
+	out, _ = call(t, s, "get_guild", map[string]any{"guild_id": "222222222222222222"})
+	if !strings.HasPrefix(out, "ERR:") {
+		t.Errorf("out-of-scope guild should fail: %s", out)
+	}
+
+	out, _ = call(t, s, "discord_request", map[string]any{"method": "GET", "path": "/guilds/" + guild + "/templates"})
+	if strings.HasPrefix(out, "ERR:") {
+		t.Errorf("raw request failed: %s", out)
+	}
+
+	out, _ = call(t, s, "server_overview", map[string]any{})
+	var ov struct {
+		Guild map[string]any   `json:"guild"`
+		Bot   map[string]any   `json:"bot"`
+		Roles []map[string]any `json:"roles"`
+		Cats  []struct {
+			Channels []struct {
+				Name string `json:"name"`
+			} `json:"channels"`
+		} `json:"categories"`
+		Uncat []any `json:"uncategorized"`
+	}
+	if err := json.Unmarshal([]byte(out), &ov); err != nil {
+		t.Fatalf("overview: %v: %s", err, out)
+	}
+	if ov.Guild["name"] != "Test" || ov.Guild["emojis"] != nil {
+		t.Errorf("guild = %v", ov.Guild)
+	}
+	if ov.Bot["highest_role_position"] != float64(3) {
+		t.Errorf("bot = %v", ov.Bot)
+	}
+	if ov.Roles[0]["name"] != "Bot" || ov.Roles[1]["administrator"] != true {
+		t.Errorf("roles = %v", ov.Roles)
+	}
+	if len(ov.Cats) != 1 || ov.Cats[0].Channels[0].Name != "rules" || len(ov.Uncat) != 1 {
+		t.Errorf("tree = %+v uncat=%v", ov.Cats, ov.Uncat)
+	}
+
+	out, _ = call(t, s, "permissions", map[string]any{"names": []any{"ADMINISTRATOR"}})
+	if out != "8" {
+		t.Errorf("permissions = %s", out)
+	}
+}
+
+func TestReadOnlyMode(t *testing.T) {
+	s, hits := newTestServer(t, true, nil)
+	if _, ok := call(t, s, "delete_channel", map[string]any{"channel_id": channel}); ok {
+		t.Error("delete_channel should not be registered in read-only mode")
+	}
+	if _, ok := call(t, s, "list_roles", map[string]any{}); !ok {
+		t.Error("list_roles should be registered")
+	}
+	out, _ := call(t, s, "discord_request", map[string]any{"method": "DELETE", "path": "/channels/" + channel})
+	if !strings.HasPrefix(out, "ERR:") {
+		t.Errorf("raw DELETE should fail in read-only: %s", out)
+	}
+	for _, h := range *hits {
+		if h.method != http.MethodGet {
+			t.Errorf("non-GET request in read-only mode: %+v", h)
+		}
+	}
+}

@@ -1,0 +1,12 @@
+/discord-mcp
+*.exe
+*.test
+*.out
+coverage.html
+.env
+env
+go.work
+.vscode/
+.idea/
+*.swp
+.DS_Store

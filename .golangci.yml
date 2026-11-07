@@ -1,0 +1,43 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - gosec
+    - errorlint
+    - misspell
+    - revive
+    - unused
+    - ineffassign
+    - gocritic
+  settings:
+    gosec:
+      excludes:
+        - G115 # integer overflow conversion - too many false positives
+    revive:
+      rules:
+        - name: package-comments
+          disabled: true
+  exclusions:
+    rules:
+      # Intentional reads of user-supplied paths: token file, env file, and
+      # local images the operator asks to upload (the server runs as them).
+      - linters: [gosec]
+        text: "(G304|G703)"
+        path: "internal/(config|tools)/"
+      # Image URLs are fetched on the operator's behalf by design.
+      - linters: [gosec]
+        text: "G107|G704"
+        path: "internal/tools/image.go"
+      - linters: [gosec]
+        path: "_test\\.go"
+
+run:
+  timeout: 5m
