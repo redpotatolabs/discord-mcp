@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -69,6 +70,18 @@ func TestTokenFile(t *testing.T) {
 	cfg, err := fromEnv(env(map[string]string{"DISCORD_TOKEN_FILE": p}))
 	if err != nil || cfg.Token != "secret" {
 		t.Fatalf("token=%q err=%v", cfg.Token, err)
+	}
+}
+
+func TestEnvFileCandidates(t *testing.T) {
+	exe, _ := os.Executable()
+	exe, _ = filepath.EvalSymlinks(exe)
+	c := EnvFileCandidates()
+	if len(c) == 0 || c[0] != filepath.Join(filepath.Dir(exe), ".env") {
+		t.Fatalf("first candidate should be .env next to the binary, got %v", c)
+	}
+	if !strings.HasSuffix(c[len(c)-1], filepath.Join("discord-mcp", ".env")) {
+		t.Errorf("last candidate should be the XDG config file, got %v", c)
 	}
 }
 

@@ -1,5 +1,5 @@
 // Package config loads settings from the environment, optionally seeded from
-// an env file (default $XDG_CONFIG_HOME/discord-mcp/env).
+// a .env file next to the binary or in $XDG_CONFIG_HOME/discord-mcp/.
 package config
 
 import (
@@ -24,24 +24,38 @@ type Config struct {
 	BaseURL       string
 }
 
-// DefaultEnvFile returns the env file path used when DISCORD_MCP_ENV_FILE is unset.
-func DefaultEnvFile() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return ""
+// EnvFileCandidates returns the env files tried, in order, when
+// DISCORD_MCP_ENV_FILE is unset: .env next to the (symlink-resolved)
+// executable — i.e. the repo when running the repo-built binary — then
+// $XDG_CONFIG_HOME/discord-mcp/.env.
+func EnvFileCandidates() []string {
+	var out []string
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		out = append(out, filepath.Join(filepath.Dir(exe), ".env"))
 	}
-	return filepath.Join(dir, "discord-mcp", "env")
+	if dir, err := os.UserConfigDir(); err == nil {
+		out = append(out, filepath.Join(dir, "discord-mcp", ".env"))
+	}
+	return out
 }
 
 // Load reads configuration. Real environment variables win over the env file.
+// Only the first env file found is loaded.
 func Load() (Config, error) {
-	envFile := os.Getenv("DISCORD_MCP_ENV_FILE")
-	if envFile == "" {
-		envFile = DefaultEnvFile()
+	candidates := EnvFileCandidates()
+	if f := os.Getenv("DISCORD_MCP_ENV_FILE"); f != "" {
+		candidates = []string{f}
 	}
-	if envFile != "" {
-		if err := godotenv.Load(envFile); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return Config{}, fmt.Errorf("load %s: %w", envFile, err)
+	for _, f := range candidates {
+		err := godotenv.Load(f)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return Config{}, fmt.Errorf("load %s: %w", f, err)
 		}
 	}
 	return fromEnv(os.Getenv)

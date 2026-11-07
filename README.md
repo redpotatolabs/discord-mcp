@@ -20,22 +20,21 @@ The server never opens the Discord gateway. It only uses REST, so it needs no lo
    https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&scope=bot&permissions=8
    ```
    Then go to **Server Settings → Roles** and drag the bot's role to the top. A bot can only manage roles and members that are below its own highest role.
-3. **Configure it.** Copy the example config and fill in the token and guild:
+3. **Configure it.** In the repo, copy the example config and fill in the token and guild. `.env` is gitignored.
    ```sh
-   mkdir -p ~/.config/discord-mcp
-   cp .env.example ~/.config/discord-mcp/env
-   chmod 600 ~/.config/discord-mcp/env
+   cp .env.example .env
+   chmod 600 .env
    ```
    To get the guild ID, turn on **User Settings → Advanced → Developer Mode**, then right-click the server and choose **Copy Server ID**.
 4. **Install it and register it with Claude Code.**
    ```sh
-   make install                     # → ~/.local/bin/discord-mcp
+   make install                     # builds, symlinks ~/.local/bin/discord-mcp → repo binary
    claude mcp add --scope user discord -- ~/.local/bin/discord-mcp
    ```
 
 ## Configuration
 
-Settings are read from environment variables. Values in `~/.config/discord-mcp/env` (or the file named by `DISCORD_MCP_ENV_FILE`) are loaded first, and real environment variables override them.
+Settings are read from environment variables, seeded from the first `.env` found. The server looks in this order: `DISCORD_MCP_ENV_FILE` if set, then `.env` next to the binary (symlinks are resolved, so this is the repo), then `~/.config/discord-mcp/.env`. Real environment variables override the file.
 
 | Variable | Meaning |
 |---|---|

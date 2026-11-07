@@ -10,8 +10,10 @@ all: vet lint vuln test build
 build:
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) .
 
+# Symlink (not copy) so the binary resolves to the repo and finds ./.env.
 install: build
-	install -Dm755 $(BINARY_NAME) $(PREFIX)/bin/$(BINARY_NAME)
+	mkdir -p $(PREFIX)/bin
+	ln -sfn $(CURDIR)/$(BINARY_NAME) $(PREFIX)/bin/$(BINARY_NAME)
 
 test:
 	go test -race -coverprofile=coverage.out -covermode=atomic ./...
