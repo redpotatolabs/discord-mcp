@@ -69,6 +69,16 @@ func TestDMPrefix(t *testing.T) {
 	}
 }
 
+func TestWatchConfig(t *testing.T) {
+	cfg, err := fromEnv(env(map[string]string{"DISCORD_TOKEN": "t", "DISCORD_WATCH_CHANNEL_IDS": " 1, 2 ,", "DISCORD_TRUSTED_USER_IDS": "3"}))
+	if err != nil || !reflect.DeepEqual(cfg.WatchChannels, []string{"1", "2"}) || !reflect.DeepEqual(cfg.TrustedUsers, []string{"3"}) {
+		t.Fatalf("watch=%v trusted=%v err=%v", cfg.WatchChannels, cfg.TrustedUsers, err)
+	}
+	if _, err := fromEnv(env(map[string]string{"DISCORD_TOKEN": "t", "DISCORD_TRUSTED_USER_IDS": "red_queen_"})); err == nil {
+		t.Error("non-numeric trusted ID should fail")
+	}
+}
+
 func TestTokenFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "tok")
 	if err := os.WriteFile(p, []byte("secret\n"), 0o600); err != nil {

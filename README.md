@@ -43,8 +43,32 @@ Settings are read from environment variables, seeded from the first `.env` found
 | `DISCORD_GUILD_ID` | Default guild, used when a tool call omits `guild_id`. |
 | `DISCORD_ALLOWED_GUILD_IDS` | Comma-separated guild allowlist. If unset, it defaults to `DISCORD_GUILD_ID`. Set it to `*` to allow every guild the bot is in. |
 | `DISCORD_DM_PREFIX` | Opening line that `send_dm` puts above every DM, separated by a newline. Unset means no prefix. |
+| `DISCORD_WATCH_CHANNEL_IDS` | Comma-separated channel IDs to watch. Replies to the bot and @mentions of it there are pushed into the Claude Code session (see [Channel mode](#channel-mode)). Each must pass the guild allowlist. Unset means off. |
+| `DISCORD_TRUSTED_USER_IDS` | Comma-separated user IDs Claude may answer in watched channels without asking you first. Everyone else's messages are shown to you with a draft reply. |
 | `DISCORD_READ_ONLY` | `true` registers only the read tools, and `discord_request` accepts only GET. |
 | `LOG_LEVEL` | `debug`, `info`, `warn` or `error`. Logs go to stderr, because stdout carries the MCP protocol. |
+
+## Channel mode
+
+With `DISCORD_WATCH_CHANNEL_IDS` set, the server also acts as a [Claude Code channel](https://code.claude.com/docs/en/channels-reference). It holds a gateway connection and forwards a message into the running session when:
+
+- it is in a watched channel (never a DM, never a thread of a watched channel),
+- it is from a human, not a bot, and
+- it replies to one of the bot's messages or @mentions the bot.
+
+Each event carries `chat_id`, `message_id`, `user`, `user_id` and `trusted`, and quotes the bot message it replies to. The server's instructions tell Claude to treat the text as data, to answer trusted senders directly with a threaded `send_message`, and to show everything else to you with a suggested reply first.
+
+Setup:
+
+1. In the Developer Portal, **Bot** tab, turn on **Message Content Intent**. Without it the gateway refuses to connect, watching is disabled and the tools keep working.
+2. Set `DISCORD_WATCH_CHANNEL_IDS` (and `DISCORD_TRUSTED_USER_IDS`) in `.env`.
+3. Start Claude Code with the channel enabled. Custom channels are not on the research-preview allowlist, so use the development flag, naming the server as it appears in your MCP config:
+
+   ```sh
+   claude --dangerously-load-development-channels server:discord
+   ```
+
+Events only arrive while such a session is running; messages sent while none is are not replayed. Every running server process with watching on receives every event, so enable it in one session at a time.
 
 ## Safety model
 

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"github.com/epistemi/discord-mcp/internal/config"
 	"github.com/epistemi/discord-mcp/internal/discord"
 	"github.com/epistemi/discord-mcp/internal/tools"
+	"github.com/epistemi/discord-mcp/internal/watch"
 )
 
 var version = "dev"
@@ -50,8 +52,15 @@ func run() error {
 		return err
 	}
 	// Fail fast on a bad token rather than on the first tool call.
-	if _, err := client.Do(context.Background(), discord.Request{Method: http.MethodGet, Path: "/users/@me"}); err != nil {
+	me, err := client.Do(context.Background(), discord.Request{Method: http.MethodGet, Path: "/users/@me"})
+	if err != nil {
 		return fmt.Errorf("verify bot token: %w", err)
+	}
+	var bot struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(me, &bot); err != nil || bot.ID == "" {
+		return fmt.Errorf("verify bot token: unexpected /users/@me response")
 	}
 
 	deps := tools.Deps{
@@ -61,12 +70,33 @@ func run() error {
 		DMPrefix:     cfg.DMPrefix,
 	}
 
-	s := server.NewMCPServer("discord-mcp", version,
-		server.WithToolCapabilities(false),
-		server.WithRecovery(),
-		server.WithInstructions(instructions),
-	)
+	opts := []server.ServerOption{server.WithToolCapabilities(false), server.WithRecovery()}
+	if len(cfg.WatchChannels) > 0 {
+		// Watched channels must pass the same guild allowlist as every tool.
+		for _, id := range cfg.WatchChannels {
+			if err := deps.Scope.Check(context.Background(), http.MethodGet, "/channels/"+id); err != nil {
+				return fmt.Errorf("DISCORD_WATCH_CHANNEL_IDS %s: %w", id, err)
+			}
+		}
+		opts = append(opts,
+			server.WithExperimental(map[string]any{watch.Capability: map[string]any{}}),
+			server.WithInstructions(instructions+watch.Instructions))
+	} else {
+		opts = append(opts, server.WithInstructions(instructions))
+	}
+	s := server.NewMCPServer("discord-mcp", version, opts...)
 	n := tools.Register(s, deps, cfg.ReadOnly)
+
+	if len(cfg.WatchChannels) > 0 {
+		w := watch.New(bot.ID, cfg.WatchChannels, cfg.TrustedUsers, s.SendNotificationToAllClients)
+		// A gateway failure disables watching but keeps the tools available.
+		if gw, err := w.Open(cfg.Token); err != nil {
+			slog.Error("channel watching disabled", "err", err)
+		} else {
+			defer func() { _ = gw.Close() }()
+			slog.Info("watching channels", "channels", strings.Join(cfg.WatchChannels, ","), "trusted", strings.Join(cfg.TrustedUsers, ","))
+		}
+	}
 
 	scope := "all guilds"
 	if len(cfg.AllowedGuilds) > 0 {

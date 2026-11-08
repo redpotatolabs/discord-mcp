@@ -24,6 +24,11 @@ type Config struct {
 	BaseURL       string
 	// DMPrefix is an opening line send_dm puts before every DM; empty = none.
 	DMPrefix string
+	// WatchChannels are channels whose replies to and mentions of the bot are
+	// pushed into the session as Claude Code channel events; empty = off.
+	WatchChannels []string
+	// TrustedUsers are senders Claude may answer without asking first.
+	TrustedUsers []string
 }
 
 // EnvFileCandidates returns the env files tried, in order, when
@@ -93,6 +98,14 @@ func fromEnv(getenv func(string) string) (Config, error) {
 		cfg.ReadOnly = ro
 	}
 
+	var err error
+	if cfg.WatchChannels, err = idList(getenv, "DISCORD_WATCH_CHANNEL_IDS"); err != nil {
+		return cfg, err
+	}
+	if cfg.TrustedUsers, err = idList(getenv, "DISCORD_TRUSTED_USER_IDS"); err != nil {
+		return cfg, err
+	}
+
 	// Allowlist: explicit list, "*" for unrestricted, or default to the
 	// default guild so a single-server setup is locked to that server.
 	switch allowed := strings.TrimSpace(getenv("DISCORD_ALLOWED_GUILD_IDS")); allowed {
@@ -122,4 +135,20 @@ func fromEnv(getenv func(string) string) (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// idList parses a comma-separated list of Discord IDs.
+func idList(getenv func(string) string, key string) ([]string, error) {
+	var out []string
+	for id := range strings.SplitSeq(getenv(key), ",") {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if strings.Trim(id, "0123456789") != "" {
+			return nil, fmt.Errorf("%s: %q is not a numeric Discord ID", key, id)
+		}
+		out = append(out, id)
+	}
+	return out, nil
 }
