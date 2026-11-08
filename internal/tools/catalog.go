@@ -269,10 +269,10 @@ var Catalog = []Endpoint{
 		Desc: "Remove a user from a thread."},
 
 	// ---- Messages ----
-	{Name: "list_messages", Method: get, Path: "/channels/{channel_id}/messages",
+	{Name: "list_messages", Method: get, Path: "/channels/{channel_id}/messages", Shape: compactMessages,
 		Desc:   "Read recent messages in a channel or thread (newest first).",
 		Params: []Param{limitP("100"), beforeP, afterP, q("around", String, "Return messages around this ID")}},
-	{Name: "get_message", Method: get, Path: "/channels/{channel_id}/messages/{message_id}",
+	{Name: "get_message", Method: get, Path: "/channels/{channel_id}/messages/{message_id}", Shape: compactMessages,
 		Desc: "Get a single message."},
 	{Name: "send_message", Method: post, Path: "/channels/{channel_id}/messages", Extra: true,
 		Desc: "Send a message to a channel or thread. Use extra for polls, stickers (sticker_ids), etc.",
@@ -290,7 +290,7 @@ var Catalog = []Endpoint{
 		Params: []Param{br("messages", Strings, "Message IDs")}},
 	{Name: "crosspost_message", Method: post, Path: "/channels/{channel_id}/messages/{message_id}/crosspost",
 		Desc: "Publish a message in an announcement channel to followers."},
-	{Name: "list_pins", Method: get, Path: "/channels/{channel_id}/pins",
+	{Name: "list_pins", Method: get, Path: "/channels/{channel_id}/pins", Shape: compactMessages,
 		Desc: "List pinned messages."},
 	{Name: "pin_message", Method: put, Path: "/channels/{channel_id}/pins/{message_id}",
 		Desc: "Pin a message."},

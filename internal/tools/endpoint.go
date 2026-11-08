@@ -74,6 +74,9 @@ type Endpoint struct {
 	Destructive bool
 	// Defaults are body fields sent unless the caller sets them.
 	Defaults map[string]any
+	// Shape, if set, compacts the response by default; callers can pass
+	// full=true to get the raw Discord payload.
+	Shape func(json.RawMessage) json.RawMessage
 }
 
 // ReadOnly reports whether the endpoint never mutates state.
@@ -148,6 +151,9 @@ func (e Endpoint) Tool(hasDefaultGuild bool) mcp.Tool {
 	}
 	if !e.ReadOnly() {
 		opts = append(opts, mcp.WithString("reason", mcp.Description("Audit-log reason shown in the server's audit log")))
+	}
+	if e.Shape != nil {
+		opts = append(opts, mcp.WithBoolean("full", mcp.Description("Return raw Discord objects instead of the compact form (which drops cosmetic profile data)")))
 	}
 	return mcp.NewTool(e.Name, opts...)
 }
@@ -351,8 +357,9 @@ func queryString(v any) string {
 // maxResult caps tool output so one huge listing can't flood the context.
 const maxResult = 200_000
 
-// execute runs a request through the scope guard and formats the result.
-func execute(ctx context.Context, d Deps, tool string, req discord.Request) (*mcp.CallToolResult, error) {
+// execute runs a request through the scope guard and formats the result,
+// applying shape (if non-nil) to successful responses.
+func execute(ctx context.Context, d Deps, tool string, req discord.Request, shape func(json.RawMessage) json.RawMessage) (*mcp.CallToolResult, error) {
 	if err := d.Scope.Check(ctx, req.Method, req.Path); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -366,6 +373,9 @@ func execute(ctx context.Context, d Deps, tool string, req discord.Request) (*mc
 	}
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if shape != nil && len(resp) > 0 {
+		resp = shape(resp)
 	}
 	return mcp.NewToolResultText(formatResult(resp)), nil
 }
@@ -387,6 +397,10 @@ func (e Endpoint) Handler(d Deps) server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return execute(ctx, d, e.Name, req)
+		shape := e.Shape
+		if r.GetBool("full", false) {
+			shape = nil
+		}
+		return execute(ctx, d, e.Name, req, shape)
 	}
 }

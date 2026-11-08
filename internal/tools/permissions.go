@@ -59,6 +59,8 @@ var permissionBits = map[string]uint{
 	"CREATE_EVENTS":                       44,
 	"USE_EXTERNAL_SOUNDS":                 45,
 	"SEND_VOICE_MESSAGES":                 46,
+	"USE_CLYDE_AI":                        47, // retired, still set on older @everyone roles
+	"SET_VOICE_CHANNEL_STATUS":            48,
 	"SEND_POLLS":                          49,
 	"USE_EXTERNAL_APPS":                   50,
 	"PIN_MESSAGES":                        51,

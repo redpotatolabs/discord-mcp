@@ -277,6 +277,6 @@ func rawHandler(d Deps, readOnly bool) server.ToolHandlerFunc {
 		} else if bo, ok := args["body"].(map[string]any); ok {
 			req.Body = bo
 		}
-		return execute(ctx, d, "discord_request", req)
+		return execute(ctx, d, "discord_request", req, nil)
 	}
 }

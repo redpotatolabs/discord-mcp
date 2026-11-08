@@ -180,9 +180,55 @@ func TestPermissions(t *testing.T) {
 	if _, err := PermissionsToBits([]string{"FLY"}); err == nil {
 		t.Error("expected unknown permission")
 	}
-	names, _ = BitsToPermissions("140737488355328") // bit 47
-	if !reflect.DeepEqual(names, []string{"UNKNOWN_BIT_47"}) {
+	names, _ = BitsToPermissions("9223372036854775808") // bit 63
+	if !reflect.DeepEqual(names, []string{"UNKNOWN_BIT_63"}) {
 		t.Errorf("names = %v", names)
+	}
+	// Default @everyone bitfield from a real 2026 guild decodes fully.
+	names, _ = BitsToPermissions("2248473465835073")
+	for _, n := range names {
+		if strings.HasPrefix(n, "UNKNOWN") {
+			t.Errorf("unexpected %s in default @everyone permissions", n)
+		}
+	}
+}
+
+func TestCompactMessages(t *testing.T) {
+	raw := json.RawMessage(`[
+	 {"id":"2","type":19,"content":"nice","timestamp":"t2","edited_timestamp":null,
+	  "author":{"id":"u1","username":"red_queen_","global_name":"RedQueen","collectibles":{"nameplate":{"asset":"x"}},"clan":{"tag":"148"}},
+	  "mentions":[{"id":"u2","username":"existemi","global_name":"Potato","avatar_decoration_data":{"asset":"y"}}],
+	  "attachments":[{"id":"a","filename":"logo.png","url":"https://cdn/x.png","content_type":"image/png","size":10,"width":5,"height":5,"placeholder":"zzz"}],
+	  "embeds":[],"components":[],"sticker_items":[{"id":"s","name":"Wave","format_type":3}],
+	  "reactions":[{"count":2,"emoji":{"id":null,"name":"🔥"}}],
+	  "message_reference":{"message_id":"1","channel_id":"c"},
+	  "referenced_message":{"id":"1","content":"make a logo","author":{"id":"u2","username":"existemi"}}},
+	 {"id":"3","type":7,"content":"","timestamp":"t3","author":{"id":"b","username":"Roy's MCP","bot":true},
+	  "actor":{"id":"u2","username":"existemi","global_name":"Potato"}}
+	]`)
+	out := string(compactMessages(raw))
+	for _, gone := range []string{"collectibles", "clan", "avatar_decoration", "placeholder", "nameplate"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("compact output still contains %q: %s", gone, out)
+		}
+	}
+	for _, kept := range []string{`"content":"nice"`, `"display_name":"RedQueen"`, `"filename":"logo.png"`, `"url":"https://cdn/x.png"`,
+		`"stickers":["Wave"]`, `"🔥":2`, `"reply_to":{"message_id":"1","author":"existemi","content":"make a logo"}`,
+		`"type_name":"member_join"`, `"actor":{"id":"u2"`, `"bot":true`} {
+		if !strings.Contains(out, kept) {
+			t.Errorf("compact output missing %s: %s", kept, out)
+		}
+	}
+	if len(out) >= len(raw) {
+		t.Errorf("compact output not smaller: %d >= %d", len(out), len(raw))
+	}
+
+	// Single object and garbage pass-through.
+	if got := string(compactMessages(json.RawMessage(`{"id":"9","content":"x","timestamp":"t"}`))); got != `{"id":"9","timestamp":"t","content":"x"}` {
+		t.Errorf("single = %s", got)
+	}
+	if got := string(compactMessages(json.RawMessage(`{"weird":true}`))); got != `{"weird":true}` {
+		t.Errorf("non-message should pass through, got %s", got)
 	}
 }
 
@@ -310,6 +356,16 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if len(ov.Cats) != 1 || ov.Cats[0].Channels[0].Name != "rules" || len(ov.Uncat) != 1 {
 		t.Errorf("tree = %+v uncat=%v", ov.Cats, ov.Uncat)
+	}
+
+	// Shaped tools compact by default; full=true returns the raw payload.
+	out, _ = call(t, s, "get_message", map[string]any{"channel_id": channel, "message_id": msg})
+	if out != `{"id":"new","timestamp":""}` {
+		t.Errorf("compact get_message = %s", out)
+	}
+	out, _ = call(t, s, "get_message", map[string]any{"channel_id": channel, "message_id": msg, "full": true})
+	if out != `{"id":"new"}` {
+		t.Errorf("full get_message = %s", out)
 	}
 
 	out, _ = call(t, s, "permissions", map[string]any{"names": []any{"ADMINISTRATOR"}})
