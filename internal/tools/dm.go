@@ -20,9 +20,13 @@ import (
 // channels outright (they belong to no guild); this tool instead requires the
 // recipient to be a member of an allowed guild before opening the DM.
 
-func dmTool() mcp.Tool {
+func dmTool(prefix string) mcp.Tool {
+	desc := "Send a direct message to a user. When a guild allowlist is configured, the user must be a member of an allowed guild. Fails if the user has DMs from server members disabled or has blocked the bot."
+	if prefix != "" {
+		desc += fmt.Sprintf(" The server automatically starts every DM with the opening line %q; do not include it yourself.", prefix)
+	}
 	return mcp.NewTool("send_dm",
-		mcp.WithDescription("Send a direct message to a user. When a guild allowlist is configured, the user must be a member of an allowed guild. Fails if the user has DMs from server members disabled or has blocked the bot."),
+		mcp.WithDescription(desc),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
@@ -53,6 +57,9 @@ func dmHandler(d Deps) server.ToolHandlerFunc {
 		}
 		if body["content"] == nil && body["embeds"] == nil && body["poll"] == nil && body["components"] == nil {
 			return mcp.NewToolResultError("provide content, embeds, or other message fields via extra"), nil
+		}
+		if d.DMPrefix != "" {
+			body["content"] = withPrefix(d.DMPrefix, body["content"])
 		}
 
 		guild, err := sharedGuild(ctx, d, userID)
@@ -111,4 +118,13 @@ func sharedGuild(ctx context.Context, d Deps, userID string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("user %s is not a member of any allowed guild (%s)", userID, strings.Join(guilds, ", "))
+}
+
+// withPrefix puts the opening line above the message text, or makes it the
+// whole text when the message has none (embed- or component-only DMs).
+func withPrefix(prefix string, content any) string {
+	if c, ok := content.(string); ok && c != "" {
+		return prefix + "\n" + c
+	}
+	return prefix
 }

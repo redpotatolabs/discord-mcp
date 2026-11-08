@@ -42,6 +42,7 @@ Settings are read from environment variables, seeded from the first `.env` found
 | `DISCORD_TOKEN` / `DISCORD_TOKEN_FILE` | Bot token, given directly or as a path to a file holding it. |
 | `DISCORD_GUILD_ID` | Default guild, used when a tool call omits `guild_id`. |
 | `DISCORD_ALLOWED_GUILD_IDS` | Comma-separated guild allowlist. If unset, it defaults to `DISCORD_GUILD_ID`. Set it to `*` to allow every guild the bot is in. |
+| `DISCORD_DM_PREFIX` | Opening line that `send_dm` puts above every DM, separated by a newline. Unset means no prefix. |
 | `DISCORD_READ_ONLY` | `true` registers only the read tools, and `discord_request` accepts only GET. |
 | `LOG_LEVEL` | `debug`, `info`, `warn` or `error`. Logs go to stderr, because stdout carries the MCP protocol. |
 

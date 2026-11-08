@@ -36,7 +36,7 @@ func Register(s *server.MCPServer, d Deps, readOnly bool) int {
 	s.AddTool(rawTool(readOnly), rawHandler(d, readOnly))
 	n += 3
 	if !readOnly {
-		s.AddTool(dmTool(), dmHandler(d))
+		s.AddTool(dmTool(d.DMPrefix), dmHandler(d))
 		n++
 	}
 	return n

@@ -58,6 +58,7 @@ func run() error {
 		Client:       client,
 		Scope:        discord.NewScope(client, cfg.AllowedGuilds),
 		DefaultGuild: cfg.DefaultGuild,
+		DMPrefix:     cfg.DMPrefix,
 	}
 
 	s := server.NewMCPServer("discord-mcp", version,

@@ -87,6 +87,8 @@ type Deps struct {
 	Client       *discord.Client
 	Scope        *discord.Scope
 	DefaultGuild string
+	// DMPrefix is prepended, on its own line, to every send_dm message.
+	DMPrefix string
 }
 
 var placeholderRe = regexp.MustCompile(`\{([a-z_]+)\}`)

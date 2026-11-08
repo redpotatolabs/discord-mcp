@@ -62,6 +62,13 @@ func TestFromEnv(t *testing.T) {
 	}
 }
 
+func TestDMPrefix(t *testing.T) {
+	cfg, err := fromEnv(env(map[string]string{"DISCORD_TOKEN": "t", "DISCORD_DM_PREFIX": "Hi there:\n"}))
+	if err != nil || cfg.DMPrefix != "Hi there:" {
+		t.Fatalf("prefix=%q err=%v", cfg.DMPrefix, err)
+	}
+}
+
 func TestTokenFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "tok")
 	if err := os.WriteFile(p, []byte("secret\n"), 0o600); err != nil {

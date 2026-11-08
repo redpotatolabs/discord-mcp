@@ -249,7 +249,7 @@ func TestValidateRawPath(t *testing.T) {
 
 type hit struct{ method, path, body string }
 
-func newTestServer(t *testing.T, readOnly bool, allowed []string) (*server.MCPServer, *[]hit) {
+func newTestServer(t *testing.T, readOnly bool, allowed []string, opts ...func(*Deps)) (*server.MCPServer, *[]hit) {
 	t.Helper()
 	var hits []hit
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +293,11 @@ func newTestServer(t *testing.T, readOnly bool, allowed []string) (*server.MCPSe
 		t.Fatal(err)
 	}
 	s := server.NewMCPServer("test", "0")
-	Register(s, Deps{Client: c, Scope: discord.NewScope(c, allowed), DefaultGuild: guild}, readOnly)
+	d := Deps{Client: c, Scope: discord.NewScope(c, allowed), DefaultGuild: guild}
+	for _, o := range opts {
+		o(&d)
+	}
+	Register(s, d, readOnly)
 	return s, &hits
 }
 
@@ -432,6 +436,30 @@ func TestSendDM(t *testing.T) {
 	out, _ = call(t, s, "discord_request", map[string]any{"method": "POST", "path": "/users/@me/channels", "body": map[string]any{"recipient_id": stranger}})
 	if !strings.HasPrefix(out, "ERR:") {
 		t.Errorf("raw DM open should stay blocked: %s", out)
+	}
+}
+
+func TestSendDMPrefix(t *testing.T) {
+	s, hits := newTestServer(t, false, []string{guild}, func(d *Deps) { d.DMPrefix = "Opening line:" })
+
+	if _, ok := call(t, s, "send_dm", map[string]any{"user_id": user, "content": "hi"}); !ok {
+		t.Fatal("send_dm failed")
+	}
+	if got := (*hits)[len(*hits)-1].body; got != `{"content":"Opening line:\nhi"}` {
+		t.Errorf("content body = %s", got)
+	}
+
+	// Embed-only DMs still carry the opening line.
+	if _, ok := call(t, s, "send_dm", map[string]any{"user_id": user, "embeds": []any{map[string]any{"title": "x"}}}); !ok {
+		t.Fatal("send_dm embeds failed")
+	}
+	if got := (*hits)[len(*hits)-1].body; got != `{"content":"Opening line:","embeds":[{"title":"x"}]}` {
+		t.Errorf("embed body = %s", got)
+	}
+
+	// The prefix alone is not a message.
+	if out, _ := call(t, s, "send_dm", map[string]any{"user_id": user}); !strings.HasPrefix(out, "ERR:") {
+		t.Errorf("empty message should fail: %s", out)
 	}
 }
 

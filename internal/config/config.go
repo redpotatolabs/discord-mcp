@@ -22,6 +22,8 @@ type Config struct {
 	ReadOnly      bool
 	LogLevel      string
 	BaseURL       string
+	// DMPrefix is an opening line send_dm puts before every DM; empty = none.
+	DMPrefix string
 }
 
 // EnvFileCandidates returns the env files tried, in order, when
@@ -67,6 +69,7 @@ func fromEnv(getenv func(string) string) (Config, error) {
 		DefaultGuild: strings.TrimSpace(getenv("DISCORD_GUILD_ID")),
 		LogLevel:     getenv("LOG_LEVEL"),
 		BaseURL:      getenv("DISCORD_API_BASE_URL"),
+		DMPrefix:     strings.TrimRight(getenv("DISCORD_DM_PREFIX"), "\r\n"),
 	}
 
 	if cfg.Token == "" {
