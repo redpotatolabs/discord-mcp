@@ -1,4 +1,4 @@
-module github.com/epistemi/discord-mcp
+module github.com/redpotatolabs/discord-mcp
 
 go 1.25.8
 

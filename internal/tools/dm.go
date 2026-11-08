@@ -13,7 +13,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/epistemi/discord-mcp/internal/discord"
+	"github.com/redpotatolabs/discord-mcp/internal/discord"
 )
 
 // send_dm is the one sanctioned path to DMs. The scope guard blocks DM

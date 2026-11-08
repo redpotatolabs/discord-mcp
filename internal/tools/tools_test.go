@@ -15,7 +15,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/epistemi/discord-mcp/internal/discord"
+	"github.com/redpotatolabs/discord-mcp/internal/discord"
 )
 
 const (

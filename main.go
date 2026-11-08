@@ -14,10 +14,10 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/epistemi/discord-mcp/internal/config"
-	"github.com/epistemi/discord-mcp/internal/discord"
-	"github.com/epistemi/discord-mcp/internal/tools"
-	"github.com/epistemi/discord-mcp/internal/watch"
+	"github.com/redpotatolabs/discord-mcp/internal/config"
+	"github.com/redpotatolabs/discord-mcp/internal/discord"
+	"github.com/redpotatolabs/discord-mcp/internal/tools"
+	"github.com/redpotatolabs/discord-mcp/internal/watch"
 )
 
 var version = "dev"
