@@ -2,11 +2,12 @@
 
 A stdio [MCP](https://modelcontextprotocol.io) server that lets Claude manage a Discord server through a bot account: channels, categories, threads, forums, permissions, roles, members and moderation, messages, reactions, pins, invites, webhooks, emojis, stickers, soundboard, scheduled events, AutoMod, welcome screen and onboarding, audit log, and guild settings.
 
-It has 98 tools. 95 map one-to-one onto Discord REST routes and are declared in `internal/tools/catalog.go`. The other three are:
+It has 99 tools. 95 map one-to-one onto Discord REST routes and are declared in `internal/tools/catalog.go`. The other four are:
 
 - `server_overview`: one call returns the guild settings, the bot's highest role position, roles from top to bottom, and the channel tree grouped by category with permission overwrites.
 - `permissions`: converts between permission names and bitfield strings locally, with no API call.
 - `discord_request`: calls any REST v10 route that has no dedicated tool, such as application commands, stage instances or guild templates.
+- `send_dm`: sends a direct message to a user. With a guild allowlist on, the user must be a member of an allowed guild, and this is the only way the server will reach a DM.
 
 The server never opens the Discord gateway. It only uses REST, so it needs no long-running connection.
 
@@ -46,7 +47,7 @@ Settings are read from environment variables, seeded from the first `.env` found
 
 ## Safety model
 
-- **Guild allowlist.** Every request is checked against the allowlist before it is sent. For channel, thread, webhook and invite IDs, the server first looks up which guild owns the ID (and caches the answer). DMs are blocked, and writes to routes that don't belong to a guild are blocked.
+- **Guild allowlist.** Every request is checked against the allowlist before it is sent. For channel, thread, webhook and invite IDs, the server first looks up which guild owns the ID (and caches the answer). DM channels are blocked, except through `send_dm`, which first checks that the recipient is a member of an allowed guild. Writes to routes that don't belong to a guild are blocked.
 - **Audit-log reasons.** Every mutating tool takes a `reason`, which appears in the server's audit log. Each mutating call also writes a line to stderr with the tool, method, path and status. Message content is not logged.
 - **Annotations.** Tools carry `readOnlyHint` and `destructiveHint`, so the client can ask for approval before destructive calls (delete, ban, kick, prune, bulk delete) and allow reads freely.
 - **Input checks.** Path IDs must be numeric snowflakes. Raw paths may not contain `..`, `//`, encoded slashes or a query string.

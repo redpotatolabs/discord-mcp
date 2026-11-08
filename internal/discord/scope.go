@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -34,6 +35,19 @@ func NewScope(c *Client, allowed []string) *Scope {
 
 // Unrestricted reports whether every guild is allowed.
 func (s *Scope) Unrestricted() bool { return s.allowed == nil }
+
+// AllowedGuilds returns the allowlist in sorted order (nil when unrestricted).
+func (s *Scope) AllowedGuilds() []string {
+	if s.allowed == nil {
+		return nil
+	}
+	out := make([]string, 0, len(s.allowed))
+	for g := range s.allowed {
+		out = append(out, g)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // GuildAllowed reports whether a guild ID is in scope.
 func (s *Scope) GuildAllowed(id string) bool { return s.allowed == nil || s.allowed[id] }

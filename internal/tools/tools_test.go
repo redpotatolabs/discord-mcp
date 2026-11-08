@@ -19,10 +19,12 @@ import (
 )
 
 const (
-	guild   = "111111111111111111"
-	channel = "333333333333333333"
-	msg     = "666666666666666666"
-	user    = "777777777777777777"
+	guild     = "111111111111111111"
+	channel   = "333333333333333333"
+	msg       = "666666666666666666"
+	user      = "777777777777777777"
+	stranger  = "888888888888888888"
+	dmChannel = "999999999999999999"
 )
 
 func endpoint(t *testing.T, name string) Endpoint {
@@ -37,7 +39,7 @@ func endpoint(t *testing.T, name string) Endpoint {
 }
 
 func TestCatalogSanity(t *testing.T) {
-	seen := map[string]bool{"server_overview": true, "permissions": true, "discord_request": true}
+	seen := map[string]bool{"server_overview": true, "permissions": true, "discord_request": true, "send_dm": true}
 	for _, e := range Catalog {
 		if seen[e.Name] {
 			t.Errorf("duplicate tool name %s", e.Name)
@@ -266,6 +268,18 @@ func newTestServer(t *testing.T, readOnly bool, allowed []string) (*server.MCPSe
 			_, _ = w.Write([]byte(`{"id":"` + user + `"}`))
 		case r.URL.Path == "/guilds/"+guild+"/members/"+user:
 			_, _ = w.Write([]byte(`{"roles":["10"]}`))
+		case r.URL.Path == "/guilds/"+guild+"/members/"+stranger:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Unknown Member","code":10007}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/users/@me/channels":
+			_, _ = w.Write([]byte(`{"id":"` + dmChannel + `","type":1}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/channels/"+dmChannel+"/messages":
+			if strings.Contains(string(b), "blocked") {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"message":"Cannot send messages to this user","code":50007}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"id":"dm1","content":"hi","timestamp":"t","author":{"id":"b","username":"bot","bot":true,"collectibles":{}}}`))
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -374,10 +388,59 @@ func TestEndToEnd(t *testing.T) {
 	}
 }
 
+func TestSendDM(t *testing.T) {
+	s, hits := newTestServer(t, false, []string{guild})
+
+	out, _ := call(t, s, "send_dm", map[string]any{"user_id": user, "content": "hi"})
+	if out != `{"id":"dm1","timestamp":"t","author":{"id":"b","username":"bot","bot":true},"content":"hi"}` {
+		t.Fatalf("send_dm = %s", out)
+	}
+	n := len(*hits)
+	if got := (*hits)[n-2]; got.method != "POST" || got.path != "/users/@me/channels" || got.body != `{"recipient_id":"`+user+`"}` {
+		t.Errorf("open DM hit = %+v", got)
+	}
+	if got := (*hits)[n-1]; got.path != "/channels/"+dmChannel+"/messages" || got.body != `{"content":"hi"}` {
+		t.Errorf("send hit = %+v", got)
+	}
+
+	// Non-member: rejected before any DM is opened.
+	before := len(*hits)
+	out, _ = call(t, s, "send_dm", map[string]any{"user_id": stranger, "content": "hi"})
+	if !strings.Contains(out, "not a member of any allowed guild") {
+		t.Errorf("stranger = %s", out)
+	}
+	for _, h := range (*hits)[before:] {
+		if h.method == http.MethodPost {
+			t.Errorf("POST made for non-member: %+v", h)
+		}
+	}
+
+	out, _ = call(t, s, "send_dm", map[string]any{"user_id": user, "content": "blocked"})
+	if !strings.Contains(out, "50007") || !strings.Contains(out, "blocked the bot") {
+		t.Errorf("blocked = %s", out)
+	}
+	out, _ = call(t, s, "send_dm", map[string]any{"user_id": user})
+	if !strings.HasPrefix(out, "ERR:") {
+		t.Errorf("empty message should fail: %s", out)
+	}
+	out, _ = call(t, s, "send_dm", map[string]any{"user_id": "@me", "content": "x"})
+	if !strings.HasPrefix(out, "ERR:") {
+		t.Errorf("bad user_id should fail: %s", out)
+	}
+
+	// The generic paths stay blocked: DMs only go through send_dm.
+	out, _ = call(t, s, "discord_request", map[string]any{"method": "POST", "path": "/users/@me/channels", "body": map[string]any{"recipient_id": stranger}})
+	if !strings.HasPrefix(out, "ERR:") {
+		t.Errorf("raw DM open should stay blocked: %s", out)
+	}
+}
+
 func TestReadOnlyMode(t *testing.T) {
 	s, hits := newTestServer(t, true, nil)
-	if _, ok := call(t, s, "delete_channel", map[string]any{"channel_id": channel}); ok {
-		t.Error("delete_channel should not be registered in read-only mode")
+	for _, name := range []string{"delete_channel", "send_dm"} {
+		if _, ok := call(t, s, name, map[string]any{"channel_id": channel}); ok {
+			t.Errorf("%s should not be registered in read-only mode", name)
+		}
 	}
 	if _, ok := call(t, s, "list_roles", map[string]any{}); !ok {
 		t.Error("list_roles should be registered")

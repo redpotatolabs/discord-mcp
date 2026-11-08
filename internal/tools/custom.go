@@ -34,7 +34,12 @@ func Register(s *server.MCPServer, d Deps, readOnly bool) int {
 	pt, ph := permissionsTool()
 	s.AddTool(pt, ph)
 	s.AddTool(rawTool(readOnly), rawHandler(d, readOnly))
-	return n + 3
+	n += 3
+	if !readOnly {
+		s.AddTool(dmTool(), dmHandler(d))
+		n++
+	}
+	return n
 }
 
 // ---- server_overview ----
