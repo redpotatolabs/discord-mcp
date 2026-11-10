@@ -39,6 +39,9 @@ func Register(s *server.MCPServer, d Deps, readOnly bool) int {
 		s.AddTool(dmTool(d.DMPrefix), dmHandler(d))
 		n++
 	}
+	// read_dm is read-only, so it stays available in read-only mode.
+	s.AddTool(readDMTool(), readDMHandler(d))
+	n++
 	return n
 }
 

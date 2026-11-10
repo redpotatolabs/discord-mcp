@@ -39,7 +39,7 @@ func endpoint(t *testing.T, name string) Endpoint {
 }
 
 func TestCatalogSanity(t *testing.T) {
-	seen := map[string]bool{"server_overview": true, "permissions": true, "discord_request": true, "send_dm": true}
+	seen := map[string]bool{"server_overview": true, "permissions": true, "discord_request": true, "send_dm": true, "read_dm": true}
 	for _, e := range Catalog {
 		if seen[e.Name] {
 			t.Errorf("duplicate tool name %s", e.Name)
@@ -273,6 +273,8 @@ func newTestServer(t *testing.T, readOnly bool, allowed []string, opts ...func(*
 			_, _ = w.Write([]byte(`{"message":"Unknown Member","code":10007}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/users/@me/channels":
 			_, _ = w.Write([]byte(`{"id":"` + dmChannel + `","type":1}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/channels/"+dmChannel+"/messages":
+			_, _ = w.Write([]byte(`[{"id":"dm2","content":"reply","timestamp":"t","author":{"id":"` + user + `","username":"u","collectibles":{}}}]`))
 		case r.Method == http.MethodPost && r.URL.Path == "/channels/"+dmChannel+"/messages":
 			if strings.Contains(string(b), "blocked") {
 				w.WriteHeader(http.StatusForbidden)
@@ -436,6 +438,49 @@ func TestSendDM(t *testing.T) {
 	out, _ = call(t, s, "discord_request", map[string]any{"method": "POST", "path": "/users/@me/channels", "body": map[string]any{"recipient_id": stranger}})
 	if !strings.HasPrefix(out, "ERR:") {
 		t.Errorf("raw DM open should stay blocked: %s", out)
+	}
+}
+
+func TestReadDM(t *testing.T) {
+	s, hits := newTestServer(t, false, []string{guild})
+
+	out, ok := call(t, s, "read_dm", map[string]any{"user_id": user, "after": "123456789012345678", "limit": float64(10)})
+	if !ok || out != `[{"id":"dm2","timestamp":"t","author":{"id":"`+user+`","username":"u"},"content":"reply"}]` {
+		t.Fatalf("read_dm = %s", out)
+	}
+	n := len(*hits)
+	if got := (*hits)[n-2]; got.method != "POST" || got.path != "/users/@me/channels" {
+		t.Errorf("open DM hit = %+v", got)
+	}
+	if got := (*hits)[n-1]; got.method != "GET" || got.path != "/channels/"+dmChannel+"/messages" {
+		t.Errorf("read hit = %+v", got)
+	}
+
+	// Non-member: rejected before any DM channel is opened or read.
+	before := len(*hits)
+	out, _ = call(t, s, "read_dm", map[string]any{"user_id": stranger})
+	if !strings.Contains(out, "not a member of any allowed guild") {
+		t.Errorf("stranger = %s", out)
+	}
+	for _, h := range (*hits)[before:] {
+		if h.method == http.MethodPost || strings.Contains(h.path, "/messages") {
+			t.Errorf("DM touched for non-member: %+v", h)
+		}
+	}
+
+	for name, args := range map[string]map[string]any{
+		"bad user":  {"user_id": "@me"},
+		"bad limit": {"user_id": user, "limit": float64(500)},
+		"bad after": {"user_id": user, "after": "x"},
+	} {
+		if out, _ := call(t, s, "read_dm", args); !strings.HasPrefix(out, "ERR:") {
+			t.Errorf("%s should fail: %s", name, out)
+		}
+	}
+
+	// The generic read of a DM channel stays blocked.
+	if out, _ := call(t, s, "list_messages", map[string]any{"channel_id": dmChannel}); !strings.HasPrefix(out, "ERR:") {
+		t.Errorf("raw DM read should stay blocked: %s", out)
 	}
 }
 
